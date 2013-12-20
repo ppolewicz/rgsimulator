@@ -1,6 +1,7 @@
 #!/usr/bin/env python2
 from rgsimulatorUI import SimulatorUI
-import Tkinter
+import csv
+import itertools
 import tkSimpleDialog
 import argparse
 from rgkit import rg, game, settings
@@ -11,6 +12,7 @@ import traceback
 import os
 
 class Simulator:
+	SAVE_FILE = 'rgsimulator.csv'
 	def __init__(self, settings, player, player2):
 		self.settings = settings
 		self.player = player
@@ -24,6 +26,7 @@ class Simulator:
 		self.robot_id = 0
 
 		self.turn = 1
+		self.last_recipe_id = -1
 		self.UI.setTurn(self.turn)
 
 		self.UI.bind("w", lambda ev: self.UI.moveSelection((0, -1)))
@@ -46,6 +49,8 @@ class Simulator:
 		self.UI.bind("h", self.onEditHP)
 		self.UI.bind("<space>", self.onShowActions)
 		self.UI.bind("<Return>", self.onSimulate)
+		self.UI.bind("v", self.onSave)
+		self.UI.bind("l", self.onLoad)
 
 		self.UI.run()
 
@@ -78,6 +83,32 @@ class Simulator:
 
 		self.addRobot(self.UI.selection, 1)
 		self.UI.renderBot(self.UI.selection, 50, 1)
+
+	def onSave(self, event):
+		def serialize(robot):
+			return ':'.join((robot.player_id, robot.hp, robot.location[0], robot.location[1]))
+		with open(self.SAVE_FILE, 'a') as fd:
+			csv.writer(fd).writerow([serialize(robot) for robot in self.robots])
+			print('added a recipe')
+
+	def onLoad(self, event):
+		def deserialize(entry):
+			id_, hp, x, y = map(int, entry.split(':'))
+			return id_, hp, (x, y)
+		with open(self.SAVE_FILE, 'r') as fd:
+			recipes = [row for row in csv.reader(fd)]
+			if len(recipes) <= self.last_recipe_id+1:
+				return
+			robots = recipes[self.last_recipe_id+1]
+			if robots is not None:
+				self.last_recipe_id += 1
+				self.onClear()
+				print('loaded recipe %s' % (self.last_recipe_id,))
+				print robots
+                for robot in robots:
+					id_, hp, location = deserialize(robot)
+					self.addRobot(location, id_, hp)
+					self.UI.renderBot(self.UI.selection, hp, id_)
 
 	def onAddEnemy(self, event):
 		self.UI.fadeActions()
@@ -116,9 +147,11 @@ class Simulator:
 	def getRobot(self, loc):
 		return self.field[loc]
 
-	def addRobot(self, loc, player_id):
+	def addRobot(self, loc, player_id, hp=None):
+		if hp is None:
+			hp = self.settings.robot_hp
 		robot_id = self.getRobotID()
-		robot = game.InternalRobot(loc, self.settings.robot_hp, player_id, robot_id, self.field, 0)
+		robot = game.InternalRobot(loc, hp, player_id, robot_id, self.field, 0)
 		self.robots.append(robot)
 		self.field[loc] = robot
 
@@ -174,7 +207,7 @@ class Simulator:
 	            self.field[robot.location] = None
 	            self.UI.renderEmpty(robot.location)
 
-	def onClear(self, event):
+	def onClear(self, event=None):
 		self.UI.clearActions()
 		self.cached_actions = None
 		locations = [robot.location for robot in self.robots]
